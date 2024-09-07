@@ -25,39 +25,65 @@ def read_from_url(url: str) -> BytesIO:
     return audio_bytes
 
 def read_from_youtube(url: str) -> tuple[BytesIO, str]:
-    ydl_opts = {
-        'format': 'worstaudio/worst',
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'm4a',
-            'preferredquality': '32',
-        }],
-        'outtmpl': 'temp_audio.%(ext)s',
+    """
+    Reads audio from a YouTube video using the Cobalt API.
+
+    Args:
+    url (str): The URL of the YouTube video.
+
+    Returns:
+    tuple[BytesIO, str]: A tuple containing the audio data as a BytesIO object and the MIME type of the audio.
+    """
+
+    # Set up the API endpoint and headers
+    api_endpoint = "https://api.cobalt.tools/api/json"
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json"
     }
-    
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-        filename = ydl.prepare_filename(info)
-        
-        # The file extension might have changed due to FFmpeg conversion
-        if os.path.exists(filename):
-            actual_filename = filename
-        elif os.path.exists(filename.rsplit('.', 1)[0] + '.m4a'):
-            actual_filename = filename.rsplit('.', 1)[0] + '.m4a'
-        else:
-            raise FileNotFoundError(f"Could not find the downloaded audio file: {filename}")
-        
-        # Read the file into a BytesIO object
-        with open(actual_filename, 'rb') as f:
-            buffer = BytesIO(f.read())
-        
-        # Get the MIME type
-        mime_type = f"audio/{actual_filename.split('.')[-1]}"
-        
-        # Delete the temporary file
-        os.remove(actual_filename)
-    
-    return buffer, mime_type
+
+    # Set up the data to be sent in the POST request
+    data = {
+        "url": url,
+        "vCodec": "h264",
+        "vQuality": "720",
+        "aFormat": "mp3",
+        "filenamePattern": "classic",
+        "isAudioOnly": True
+    }
+
+    # Make the POST request to the API
+    response = requests.post(api_endpoint, headers=headers, data=json.dumps(data))
+
+    # Check if the response was successful
+    if response.status_code != 200:
+        raise Exception(f"Failed to retrieve audio from YouTube: {response.text}")
+
+    # Parse the response JSON
+    response_json = response.json()
+
+    # Get the URL of the audio stream
+    stream_url = response_json["url"]
+
+    # Make a GET request to the audio stream URL
+    audio_response = requests.get(stream_url, stream=True)
+
+    # Check if the response was successful
+    if audio_response.status_code != 200:
+        raise Exception(f"Failed to retrieve audio stream: {audio_response.text}")
+
+    # Create a BytesIO object to store the audio data
+    audio_buffer = BytesIO()
+
+    # Iterate over the chunks of the audio response and write them to the BytesIO object
+    for chunk in audio_response.iter_content(1024):
+        audio_buffer.write(chunk)
+
+    # Seek the BytesIO object back to the beginning
+    audio_buffer.seek(0)
+
+    # Return the audio data and MIME type
+    return audio_buffer, "audio/mpeg"
 
 # def read_from_youtube(url: str):
 #     yt = YouTube(url)
